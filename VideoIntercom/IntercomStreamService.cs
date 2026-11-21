@@ -123,7 +123,13 @@ public sealed class IntercomStreamService : BackgroundService
     /// Читает TCP-поток, выделяет кадры и рассылает подписчикам.
     /// Кадр = всё от start code пакета до начала следующего маркера;
     /// публикуется, когда начнёт приходить следующий пакет (граница известна).
+    ///
+    /// Watchdog простоя: зависший полуоткрытый TCP не даёт ошибок чтения —
+    /// если NoDataTimeout секунд не пришло ни байта, соединение рвётся
+    /// и ExecuteAsync переподключается с новым handshake.
     /// </summary>
+    private static readonly TimeSpan NoDataTimeout = TimeSpan.FromSeconds(10);
+
     private async Task PumpAsync(NetworkStream stream, CancellationToken ct)
     {
         var buffer = new byte[64 * 1024];
@@ -131,10 +137,24 @@ public sealed class IntercomStreamService : BackgroundService
         const int maxBuffer = 4_000_000; // защита от рассинхронизации протокола
         var lastTs = new Dictionary<int, long>();
 
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        idle.CancelAfter(NoDataTimeout);
+
         while (!ct.IsCancellationRequested)
         {
-            var read = await stream.ReadAsync(buffer, ct);
+            int read;
+            try
+            {
+                read = await stream.ReadAsync(buffer, idle.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                throw new IOException(
+                    $"Нет данных от домофона {(int)NoDataTimeout.TotalSeconds} с (соединение зависло)");
+            }
             if (read == 0) throw new IOException("Домофон закрыл соединение");
+
+            idle.CancelAfter(NoDataTimeout); // данные идут — перезапускаем таймер простоя
 
             var data = new byte[leftover.Length + read];
             leftover.CopyTo(data, 0);

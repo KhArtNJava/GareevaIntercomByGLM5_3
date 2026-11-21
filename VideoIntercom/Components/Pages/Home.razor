@@ -17,6 +17,15 @@
     </div>
 
     <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+        <div class="btn-group btn-group-sm" role="group" aria-label="Выбор канала">
+            <button type="button" class="btn @(_channel == 0 ? "btn-primary" : "btn-outline-primary")"
+                    @onclick="() => SwitchChannel(0)">Субпоток 704×576</button>
+            <button type="button" class="btn @(_channel == 1 ? "btn-primary" : "btn-outline-primary")"
+                    @onclick="() => SwitchChannel(1)">HD 1280×720 · 25 к/с</button>
+        </div>
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
         <span class="badge @StatusBadgeClass">@Status</span>
         <span class="text-body-secondary small">кадров: @string.Format("{0:N0}", FramesTotal)</span>
         <span class="text-body-secondary small">@(TimeSinceLastFrame is null ? "нет кадров" : $"последний кадр {TimeSinceLastFrame.Value.TotalSeconds:0.0} с назад")</span>
@@ -28,6 +37,7 @@
     private long FramesTotal;
     private TimeSpan? TimeSinceLastFrame;
     private System.Timers.Timer? _timer;
+    private int _channel;
 
     private string StatusBadgeClass => Status switch
     {
@@ -42,11 +52,19 @@
         if (!firstRender) return;
 
         _ = JS.InvokeVoidAsync("intercomPlayer.start",
-            "intercomVideo", "videoOverlay", 0, 12);
+            "intercomVideo", "videoOverlay", _channel);
 
         _timer = new System.Timers.Timer(1000);
         _timer.Elapsed += (_, _) => InvokeAsync(RefreshStatus);
         _timer.Start();
+    }
+
+    private void SwitchChannel(int channel)
+    {
+        if (_channel == channel) return;
+        _channel = channel;
+        _ = JS.InvokeVoidAsync("intercomPlayer.start",
+            "intercomVideo", "videoOverlay", channel);
     }
 
     private void RefreshStatus()
